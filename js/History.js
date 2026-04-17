@@ -1,112 +1,91 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// History.js  —  Módulo Historial de Ventas
-// ─────────────────────────────────────────────────────────────────────────────
+
+// Historial de ventas
+
 
 var History = (function () {
 
-  var cache = [];
+  var currentDetailSale = null;
 
-  async function init() {
-    UI.tableLoading("history-tbody", 6);
-    cache = await State.getSales();
-    render(cache);
-
-    var search = document.getElementById("hist-search");
-    if (search) search.addEventListener("input", function () {
-      var q = UI.normalizarTexto(search.value);
-      render(cache.filter(function (s) {
-        return UI.normalizarTexto(s.id || "").includes(q) ||
-               UI.normalizarTexto(s.metodoPago || "").includes(q) ||
-               UI.normalizarTexto(s.fecha || "").includes(q);
-      }));
+  function init() {
+    document.getElementById('hist-search').addEventListener('input', renderTable);
+    document.getElementById('btn-invoice-from-detail').addEventListener('click', function () {
+      if (!currentDetailSale) return;
+      UI.closeModal('modal-detail');
+      POS.openInvoiceForSale(currentDetailSale);
     });
+    renderTable();
   }
 
-  function render(list) {
-    var tbody = document.getElementById("history-tbody");
-    if (!tbody) return;
+  function refresh() { renderTable(); }
+
+  function renderTable() {
+    var q     = document.getElementById('hist-search').value.toLowerCase();
+    var tbody = document.getElementById('history-tbody');
+    var list  = State.getSales().slice().reverse().filter(function (s) {
+      return s.id.toLowerCase().indexOf(q) >= 0 ||
+             UI.labelMethod(s.paymentMethod).toLowerCase().indexOf(q) >= 0;
+    });
 
     if (!list.length) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-light);padding:28px">Sin ventas registradas</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-light)">'
+        + (q ? 'Sin resultados' : 'Aún no hay ventas registradas')
+        + '</td></tr>';
       return;
     }
 
-    tbody.innerHTML = list.map(function (s) {
-      var items = [];
-      try { items = JSON.parse(s.itemsJson || "[]"); } catch (e) {}
-      var qty = items.reduce(function (a, i) { return a + (i.qty || 1); }, 0);
+    tbody.innerHTML = list.map(function (sale) {
+      return '<tr>'
+        + '<td><strong>' + sale.id + '</strong></td>'
+        + '<td>' + UI.fmtDate(sale.date) + '</td>'
+        + '<td>' + sale.items.length + ' ítem' + (sale.items.length !== 1 ? 's' : '') + '</td>'
+        + '<td><strong>' + UI.fmtCurrency(sale.total) + '</strong></td>'
+        + '<td><span class="badge status-' + sale.paymentMethod + '">' + UI.labelMethod(sale.paymentMethod) + '</span></td>'
+        + '<td><div style="display:flex;gap:6px">'
+        + '<button class="btn btn-outline btn-sm btn-det" data-id="' + sale.id + '">🔍 Detalle</button>'
+        + '<button class="btn btn-ghost btn-sm btn-inv" data-id="' + sale.id + '">🧾 Factura</button>'
+        + '</div></td></tr>';
+    }).join('');
 
-      return '<tr>' +
-        '<td><span class="badge badge-gold">' + (s.id || "—") + '</span></td>' +
-        '<td>' + UI.fmtDate(s.fecha) + '</td>' +
-        '<td>' + qty + '</td>' +
-        '<td><b>' + UI.fmtCurrency(s.total) + '</b></td>' +
-        '<td><span class="badge badge-success">' + (s.metodoPago || "—") + '</span></td>' +
-        '<td class="actions-cell">' +
-          '<button class="btn-edit" onclick="History.showDetail(\'' + (s.id || "") + '\')">👁️</button>' +
-        '</td>' +
-      '</tr>';
-    }).join("");
-  }
-
-  function showDetail(id) {
-    var sale = cache.find(function (s) { return String(s.id) === String(id); });
-    if (!sale) return;
-
-    var items = [];
-    try { items = JSON.parse(sale.itemsJson || "[]"); } catch (e) {}
-
-    var body = document.getElementById("detail-body");
-    if (!body) return;
-
-    var total = items.reduce(function (s, i) { return s + i.precio * i.qty; }, 0);
-
-    body.innerHTML =
-      '<div style="padding:0 4px">' +
-      '<p style="margin-bottom:12px;color:var(--text-light);font-size:.85rem">ID: <b>' + sale.id + '</b> — ' + UI.fmtDate(sale.fecha) + ' — ' + UI.labelMethod(sale.metodoPago) + '</p>' +
-      '<div class="table-wrapper">' +
-      '<table><thead><tr><th>Producto</th><th>Cant.</th><th>Precio</th><th>Subtotal</th></tr></thead><tbody>' +
-      items.map(function (i) {
-        return '<tr>' +
-          '<td>' + i.nombre + '</td>' +
-          '<td>' + i.qty + '</td>' +
-          '<td>' + UI.fmtCurrency(i.precio) + '</td>' +
-          '<td>' + UI.fmtCurrency(i.precio * i.qty) + '</td>' +
-        '</tr>';
-      }).join("") +
-      '</tbody></table></div>' +
-      '<p style="text-align:right;margin-top:12px;font-weight:700;font-size:1.1rem">TOTAL: ' + UI.fmtCurrency(total) + '</p>' +
-      '</div>';
-
-    // Guardar referencia para botón "Ver Factura" del modal de detalle
-    var btnInv = document.getElementById("btn-invoice-from-detail");
-    if (btnInv) {
-      var newBtn = btnInv.cloneNode(true);
-      btnInv.parentNode.replaceChild(newBtn, btnInv);
-      newBtn.addEventListener("click", function () {
-        UI.closeModal("modal-detail");
-        _showInvoice(items, sale.metodoPago);
+    tbody.querySelectorAll('.btn-det').forEach(function (btn) {
+      btn.addEventListener('click', function () { openDetail(btn.dataset.id); });
+    });
+    tbody.querySelectorAll('.btn-inv').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var sale = State.getSaleById(btn.dataset.id);
+        if (sale) POS.openInvoiceForSale(sale);
       });
-    }
-
-    UI.openModal("modal-detail");
+    });
   }
 
-  function _showInvoice(items, method) {
-    var body = document.getElementById("invoice-body");
-    if (!body) return;
-    var total = items.reduce(function (s, i) { return s + i.precio * i.qty; }, 0);
-    body.innerHTML =
-      '<div style="font-family:monospace;padding:10px">' +
-      '<h3 style="text-align:center;margin-bottom:12px">🌙 Papel y Luna</h3><hr style="margin-bottom:12px">' +
-      items.map(function (i) {
-        return '<div style="display:flex;justify-content:space-between;margin-bottom:6px"><span>' + i.nombre + ' × ' + i.qty + '</span><span>' + UI.fmtCurrency(i.precio * i.qty) + '</span></div>';
-      }).join("") +
-      '<hr style="margin:12px 0"><div style="display:flex;justify-content:space-between;font-weight:700"><span>TOTAL</span><span>' + UI.fmtCurrency(total) + '</span></div>' +
-      '<div style="margin-top:8px;color:#999;font-size:.85rem">Método: ' + UI.labelMethod(method) + '</div></div>';
-    UI.openModal("modal-invoice");
+  function openDetail(id) {
+    var sale = State.getSaleById(id);
+    if (!sale) return;
+    currentDetailSale = sale;
+
+    document.getElementById('detail-body').innerHTML =
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px">'
+      + '<div><div class="form-label">Número de venta</div><div style="font-weight:700;font-size:1.05rem">' + sale.id + '</div></div>'
+      + '<div><div class="form-label">Fecha</div><div>' + UI.fmtDate(sale.date) + '</div></div>'
+      + '<div><div class="form-label">Método de pago</div><div><span class="badge status-' + sale.paymentMethod + '">' + UI.labelMethod(sale.paymentMethod) + '</span></div></div>'
+      + '<div><div class="form-label">Total</div><div style="font-weight:700;color:var(--gold-dark);font-size:1.05rem">' + UI.fmtCurrency(sale.total) + '</div></div>'
+      + (sale.paymentMethod === 'efectivo'
+          ? '<div><div class="form-label">Recibido</div><div>' + UI.fmtCurrency(sale.cashReceived) + '</div></div>'
+          + '<div><div class="form-label">Cambio</div><div style="color:var(--success)">' + UI.fmtCurrency(sale.change) + '</div></div>'
+          : '')
+      + '</div>'
+      + '<div class="form-label" style="margin-bottom:8px">Productos</div>'
+      + '<div class="table-wrapper"><table><thead><tr><th>Producto</th><th>Cant.</th><th>P.Unit.</th><th>Total</th></tr></thead><tbody>'
+      + sale.items.map(function (i) {
+          return '<tr><td>' + i.name + '</td>'
+            + '<td style="text-align:center">' + i.qty + '</td>'
+            + '<td>' + UI.fmtCurrency(i.price) + '</td>'
+            + '<td><strong>' + UI.fmtCurrency(i.price * i.qty) + '</strong></td></tr>';
+        }).join('')
+      + '</tbody></table></div>';
+
+    UI.openModal('modal-detail');
   }
 
-  return { init, showDetail };
+  return { init: init, refresh: refresh };
 
 })();

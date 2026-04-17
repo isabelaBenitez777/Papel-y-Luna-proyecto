@@ -1,192 +1,223 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// Products.js  —  Módulo Gestión de Productos
-// ─────────────────────────────────────────────────────────────────────────────
+// CRUD de productos
 
 var Products = (function () {
 
-  var editingId   = null;
-  var cache       = [];
+  var editingId = null;
 
-  // ── Init ───────────────────────────────────────────────────────────────────
-  async function init() {
-    document.getElementById("btn-new-product")
-      .addEventListener("click", function () { openModal(); });
-
-    document.getElementById("prod-search")
-      .addEventListener("input", function () { renderTable(cache); });
-
-    document.getElementById("product-form")
-      .addEventListener("submit", saveProduct);
-
-    // ID del input de imagen en el HTML es "f-image"
-    var imgInput = document.getElementById("f-image");
-    if (imgInput) imgInput.addEventListener("change", previewImage);
-
-    // Control de stock: mostrar/ocultar campo según checkbox
-    var trackChk = document.getElementById("f-track");
-    if (trackChk) {
-      trackChk.addEventListener("change", function () {
-        var sf = document.getElementById("stock-field");
-        if (sf) sf.style.display = this.checked ? "flex" : "none";
-      });
-      // Estado inicial
-      document.getElementById("stock-field").style.display = trackChk.checked ? "flex" : "none";
-    }
-
-    await loadAndRender();
-  }
-
-  async function loadAndRender() {
-    UI.tableLoading("products-tbody", 7);
-    cache = await State.getProducts();
-    renderTable(cache);
-  }
-
-  // ── Tabla ──────────────────────────────────────────────────────────────────
-  function renderTable(list) {
-    var tbody = document.getElementById("products-tbody");
-    var q     = UI.normalizarTexto(document.getElementById("prod-search")?.value || "");
-
-    var filtered = list.filter(function (p) {
-      return UI.normalizarTexto(p.nombre || "").includes(q) ||
-             UI.normalizarTexto(p.categoria || p.categoría || "").includes(q) ||
-             UI.normalizarTexto(String(p.id)).includes(q);
+  function init() {
+    document.getElementById('btn-new-product').addEventListener('click', function () { openModal(); });
+    document.getElementById('prod-search').addEventListener('input', renderTable);
+    document.getElementById('product-form').addEventListener('submit', saveProduct);
+    document.getElementById('f-track').addEventListener('change', toggleStockField);
+    
+    // NUEVO: Escuchar cuando se selecciona una imagen para mostrar la vista previa
+    document.getElementById('f-image').addEventListener('change', function() {
+      previewImage(this);
     });
 
-    if (!filtered.length) {
-      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-light);padding:28px">Sin productos</td></tr>';
+    renderTable();
+  }
+
+  function refresh() { renderTable(); }
+
+  // ── Renderizado de Tabla ──
+  function renderTable() {
+    var q = UI.normalizarTexto(document.getElementById('prod-search').value);
+    var tbody = document.getElementById('products-tbody');
+    
+    var list = State.getProducts().filter(function (p) {
+      var nombre = UI.normalizarTexto(p.name);
+      var categoria = UI.normalizarTexto(p.category);
+      var codigo = UI.normalizarTexto(p.code);
+
+      return nombre.indexOf(q) >= 0 ||
+             categoria.indexOf(q) >= 0 ||
+             codigo.indexOf(q) >= 0;
+    });
+
+    if (!list.length) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-light)">'
+        + (q ? 'Sin resultados para tu búsqueda' : 'No hay productos. ¡Agrega el primero!')
+        + '</td></tr>';
       return;
     }
 
-    tbody.innerHTML = filtered.map(function (p) {
-      var cat   = p.categoria || p.categoría || "—";
-      var stock = p.seguimientoInventario === "si" || p.seguimiento === "si"
-        ? '<span class="badge ' + (Number(p.stock) > 0 ? "badge-success" : "badge-danger") + '">' + p.stock + '</span>'
-        : '<span class="badge badge-gold">∞</span>';
-
-      return '<tr>' +
-        '<td><span class="badge badge-gold">' + p.id + '</span></td>' +
-        '<td><b>' + p.nombre + '</b></td>' +
-        '<td>' + cat + '</td>' +
-        '<td>' + UI.fmtCurrency(p.precio) + '</td>' +
-        '<td>' + UI.fmtCurrency(p.costo) + '</td>' +
-        '<td>' + stock + '</td>' +
-        '<td class="actions-cell">' +
-          '<button class="btn-edit"   onclick="Products.edit(\'' + p.id + '\')">✏️</button>' +
-          '<button class="btn-delete" onclick="Products.remove(\'' + p.id + '\')">🗑️</button>' +
-        '</td>' +
-      '</tr>';
-    }).join("");
-  }
-
-  // ── Modal ──────────────────────────────────────────────────────────────────
-  function openModal(product) {
-    editingId = product ? product.id : null;
-
-    var title   = document.getElementById("prod-modal-title");
-    var form    = document.getElementById("product-form");
-    var preview = document.getElementById("img-pre-view");  // ID correcto del HTML
-
-    if (title) title.textContent = product ? "Editar Producto" : "Nuevo Producto";
-    if (form)  form.reset();
-    if (preview) { preview.style.display = "none"; preview.src = ""; }
-
-    // Código automático
-    var codeInput = document.getElementById("f-code");
-    if (codeInput) codeInput.value = product ? product.id : UI.genId("P");
-
-    if (product) {
-      _setField("f-name",     product.nombre);
-      _setField("f-category", product.categoria || product.categoría || "");
-      _setField("f-price",    product.precio);
-      _setField("f-cost",     product.costo);
-      _setField("f-stock",    product.stock || 0);
-
-      var track = product.seguimientoInventario === "si" || product.seguimiento === "si";
-      var chk   = document.getElementById("f-track");
-      if (chk) {
-        chk.checked = track;
-        var sf = document.getElementById("stock-field");
-        if (sf) sf.style.display = track ? "flex" : "none";
-      }
-
-      if (product.url_imagen && preview) {
-        preview.src = product.url_imagen;
-        preview.style.display = "block";
-      }
-    }
-
-    UI.openModal("modal-product");
-  }
-
-  function _setField(id, val) {
-    var el = document.getElementById(id);
-    if (el) el.value = val !== undefined ? val : "";
-  }
-
-  // ── Guardar ────────────────────────────────────────────────────────────────
-  async function saveProduct(e) {
-    e.preventDefault();
-
-    var nombre = (document.getElementById("f-name")?.value || "").trim();
-    if (!nombre) { UI.showToast("El nombre es obligatorio", "error"); return; }
-
-    var track = document.getElementById("f-track")?.checked ? "si" : "no";
-
-    var data = {
-      id:                    document.getElementById("f-code")?.value || UI.genId("P"),
-      nombre:                nombre,
-      categoria:             (document.getElementById("f-category")?.value || "").trim(),
-      precio:                parseFloat(document.getElementById("f-price")?.value) || 0,
-      costo:                 parseFloat(document.getElementById("f-cost")?.value) || 0,
-      stock:                 parseInt(document.getElementById("f-stock")?.value) || 0,
-      seguimientoInventario: track,
-    };
-
-    UI.showToast("Guardando...", "info");
-    var res = await State.addProduct(data);
-
-    if (res.success) {
-      UI.closeModal("modal-product");
-      UI.showToast("✅ Producto guardado");
-      editingId = null;
-      await loadAndRender();
-    } else {
-      UI.showToast("Error al guardar", "error");
-    }
-  }
-
-  // ── Editar / Eliminar ──────────────────────────────────────────────────────
-  function edit(id) {
-    var prod = cache.find(function (p) { return String(p.id) === String(id); });
-    if (prod) openModal(prod);
-  }
-
-  function remove(id) {
-    UI.confirmDialog("¿Eliminar el producto con ID: " + id + "?", async function () {
-      var res = await State.deleteProduct(id);
-      if (res.success) {
-        UI.showToast("Producto eliminado");
-        cache = cache.filter(function (p) { return String(p.id) !== String(id); });
-        renderTable(cache);
+    tbody.innerHTML = list.map(function (p) {
+      var stockBadge;
+      if (!p.trackStock) {
+        stockBadge = '<span class="badge badge-gray">N/A</span>';
+      } else if (p.stock > 5) {
+        stockBadge = '<span class="badge badge-green">' + p.stock + ' uds</span>';
+      } else if (p.stock > 0) {
+        stockBadge = '<span class="badge badge-gold">' + p.stock + ' uds</span>';
       } else {
-        UI.showToast("Error al eliminar", "error");
+        stockBadge = '<span class="badge badge-pink">Agotado</span>';
       }
+
+      var imgMini = p.image 
+        ? '<img src="' + p.image + '" class="table-prod-img">' 
+        : '<div class="table-prod-img" style="display:inline-flex;align-items:center;justify-content:center;background:#f5f5f5">🖼️</div>';
+
+      return '<tr>'
+        + '<td><strong>' + p.code + '</strong></td>'
+        + '<td><div style="display:flex;align-items:center;gap:10px">' + imgMini + '<span>' + p.name + '</span></div></td>'
+        + '<td><span class="badge badge-sage">' + p.category + '</span></td>'
+        + '<td>' + UI.fmtCurrency(p.price) + '</td>'
+        + '<td>' + UI.fmtCurrency(p.cost) + '</td>'
+        + '<td>' + stockBadge + '</td>'
+        + '<td><div style="display:flex;gap:6px">'
+        + '<button class="btn btn-outline btn-sm btn-edit" data-id="' + p.id + '">✏️ Editar</button>'
+        + '<button class="btn btn-ghost btn-sm btn-del" data-id="' + p.id + '">🗑 Eliminar</button>'
+        + '</div></td></tr>';
+    }).join('');
+
+    tbody.querySelectorAll('.btn-edit').forEach(function (btn) {
+      btn.addEventListener('click', function () { openModal(btn.dataset.id); });
+    });
+    
+    tbody.querySelectorAll('.btn-del').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var p = State.getProductById(btn.dataset.id);
+        UI.confirmDialog('¿Eliminar "' + p.name + '"? Esta acción no se puede deshacer.', function () {
+          State.deleteProduct(btn.dataset.id);
+          renderTable();
+          if (window.POS) POS.refresh();
+          UI.showToast('Producto eliminado', 'info');
+        });
+      });
     });
   }
 
-  // ── Preview imagen ─────────────────────────────────────────────────────────
-  function previewImage(e) {
-    var file = e.target.files[0];
-    if (!file) return;
-    var reader = new FileReader();
-    reader.onload = function (ev) {
-      var img = document.getElementById("img-pre-view"); // ID correcto del HTML
-      if (img) { img.src = ev.target.result; img.style.display = "block"; }
-    };
-    reader.readAsDataURL(file);
+  // ── Formulario y Modal ──
+  function toggleStockField() {
+    document.getElementById('stock-field').style.display =
+      document.getElementById('f-track').checked ? 'block' : 'none';
   }
 
-  return { init, edit, remove };
+  function previewImage(input) {
+    var preview = document.getElementById('img-pre-view');
+    if (input.files && input.files[0]) {
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        preview.src = e.target.result;
+        preview.style.display = 'block';
+      };
+      reader.readAsDataURL(input.files[0]);
+    }
+  }
+
+  function openModal(id) {
+    editingId = id || null;
+    clearErrors();
+    
+    var imgPreview = document.getElementById('img-pre-view');
+    document.getElementById('prod-modal-title').textContent = id ? 'Editar Producto' : 'Nuevo Producto';
+
+    if (id) {
+      var p = State.getProductById(id);
+      document.getElementById('f-name').value     = p.name;
+      document.getElementById('f-category').value = p.category;
+      document.getElementById('f-price').value    = p.price;
+      document.getElementById('f-cost').value     = p.cost;
+      document.getElementById('f-code').value     = p.code;
+      document.getElementById('f-track').checked  = p.trackStock;
+      document.getElementById('f-stock').value    = p.stock;
+      document.getElementById('stock-field').style.display = p.trackStock ? 'block' : 'none';
+      
+      if (p.image) {
+        imgPreview.src = p.image;
+        imgPreview.style.display = 'block';
+      } else {
+        imgPreview.style.display = 'none';
+      }
+    } else {
+      document.getElementById('product-form').reset();
+      document.getElementById('f-code').value = '(automático)';
+      document.getElementById('f-track').checked = true;
+      document.getElementById('stock-field').style.display = 'block';
+      imgPreview.style.display = 'none';
+      imgPreview.src = '';
+    }
+    UI.openModal('modal-product');
+  }
+
+  function saveProduct(e) {
+    e.preventDefault();
+    clearErrors();
+
+    var nameVal    = document.getElementById('f-name').value.trim();
+    var catVal     = document.getElementById('f-category').value.trim();
+    var priceVal   = parseFloat(document.getElementById('f-price').value);
+    var costVal    = parseFloat(document.getElementById('f-cost').value);
+    var trackStock = document.getElementById('f-track').checked;
+    var stockVal   = parseInt(document.getElementById('f-stock').value);
+    var fileInput  = document.getElementById('f-image');
+
+    var valid = true;
+    if (!nameVal) { setError('name', 'El nombre es obligatorio'); valid = false; }
+    if (!catVal) { setError('category', 'La categoría es obligatoria'); valid = false; }
+    if (isNaN(priceVal) || priceVal < 0) { setError('price', 'Precio inválido'); valid = false; }
+    if (isNaN(costVal) || costVal < 0) { setError('cost', 'Costo inválido'); valid = false; }
+    if (trackStock && (isNaN(stockVal) || stockVal < 0)) { setError('stock', 'Stock inválido'); valid = false; }
+    
+    if (!valid) return;
+
+    var proceedSave = function(base64Image) {
+      var data = { 
+        name: nameVal, 
+        category: catVal, 
+        price: priceVal, 
+        cost: costVal,
+        trackStock: trackStock, 
+        stock: trackStock ? stockVal : 0 
+      };
+
+      if (base64Image) {
+        data.image = base64Image;
+      } else if (editingId) {
+        var oldP = State.getProductById(editingId);
+        data.image = oldP.image; 
+      }
+
+      if (editingId) {
+        State.updateProduct(editingId, data);
+        UI.showToast('Producto actualizado ✦', 'success');
+      } else {
+        State.addProduct(data);
+        UI.showToast('Producto creado ✦', 'success');
+      }
+
+      UI.closeModal('modal-product');
+      renderTable();
+      if (window.POS) POS.refresh();
+    };
+
+    if (fileInput.files && fileInput.files[0]) {
+      var reader = new FileReader();
+      reader.onload = function(event) { proceedSave(event.target.result); };
+      reader.readAsDataURL(fileInput.files[0]);
+    } else {
+      proceedSave(null);
+    }
+  }
+
+  // ── Auxiliares de UI ──
+  function clearErrors() {
+    ['name','category','price','cost','stock'].forEach(function (f) {
+      var el = document.getElementById('f-' + f);
+      if (el) el.classList.remove('error');
+      var err = document.getElementById('err-' + f);
+      if (err) err.textContent = '';
+    });
+  }
+
+  function setError(field, msg) {
+    var el = document.getElementById('f-' + field);
+    if (el) el.classList.add('error');
+    var err = document.getElementById('err-' + field);
+    if (err) err.textContent = msg;
+  }
+
+  return { init: init, refresh: refresh };
 
 })();

@@ -1,103 +1,87 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// Ui.js  —  Utilidades de interfaz compartidas
-// ─────────────────────────────────────────────────────────────────────────────
-
 var UI = (function () {
-
-  // Normaliza texto para búsquedas (quita tildes, minúsculas)
+  // Función interna para limpiar texto (quitar tildes y pasar a minúsculas)
   function normalizarTexto(texto) {
     if (!texto) return "";
-    return texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    return texto
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
   }
 
-  // Formatea número a moneda colombiana
   function fmtCurrency(n) {
-    return "$ " + Number(n || 0).toLocaleString("es-CO");
+    return '$ ' + Number(n).toLocaleString('es-CO');
   }
 
-  // Formatea fecha ISO a formato legible
   function fmtDate(iso) {
-    if (!iso) return "—";
-    const d = new Date(iso);
-    if (isNaN(d)) return iso; // si ya viene como string legible, lo devuelve tal cual
-    return d.toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" });
+    return new Date(iso).toLocaleString('es-CO', {
+      day: '2-digit', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit'
+    });
   }
 
-  // Genera un ID único con prefijo
-  function genId(prefix) {
-    return (prefix || "ID") + "-" + Date.now() + "-" + Math.floor(Math.random() * 1000);
-  }
-
-  // Etiqueta del método de pago
   function labelMethod(m) {
-    return { efectivo: "💵 Efectivo", nequi: "📱 Nequi", debe: "📝 Debe" }[m] || m;
+    return { efectivo: '💵 Efectivo', nequi: '📱 Nequi', debe: '📝 Debe' }[m] || m;
   }
 
-  // ── Toast ──────────────────────────────────────────────────────────────────
   function showToast(msg, type) {
-    type = type || "success";
-    var container = document.getElementById("toast-container");
-    if (!container) return;
-
-    var icons = { success: "✅", error: "❌", info: "✦" };
-    var toast = document.createElement("div");
-    toast.className = "toast " + type;
-    toast.innerHTML = "<span>" + (icons[type] || "✦") + "</span><span>" + msg + "</span>";
-    container.appendChild(toast);
-
+    type = type || 'success';
+    var c = document.getElementById('toast-container');
+    if (!c) return;
+    var t = document.createElement('div');
+    t.className = 'toast ' + type;
+    var icons = { success: '✅', error: '❌', info: '✦' };
+    t.innerHTML = '<span>' + (icons[type] || '✦') + '</span><span>' + msg + '</span>';
+    c.appendChild(t);
     setTimeout(function () {
-      toast.style.opacity = "0";
-      setTimeout(function () { toast.remove(); }, 300);
-    }, 3000);
+      t.style.opacity = '0';
+      t.style.transition = 'opacity .3s';
+      setTimeout(function () { t.remove(); }, 300);
+    }, 3200);
   }
 
-  // ── Modales ────────────────────────────────────────────────────────────────
   function openModal(id) {
     var el = document.getElementById(id);
-    if (el) el.classList.add("open");
-    else console.warn("Modal no encontrado:", id);
+    if (el) el.classList.add('open');
   }
 
   function closeModal(id) {
     var el = document.getElementById(id);
-    if (el) el.classList.remove("open");
+    if (el) el.classList.remove('open');
   }
 
-  // Diálogo de confirmación reutilizable (usa el modal-confirm del HTML)
-  function confirmDialog(message, onConfirm) {
-    var msg = document.getElementById("confirm-msg");
-    var btn = document.getElementById("btn-confirm-ok");
-    if (!msg || !btn) return;
+  function showView(name) {
+    document.querySelectorAll('.view').forEach(function (v) { v.classList.remove('active'); });
+    document.querySelectorAll('.nav-btn').forEach(function (b) { b.classList.remove('active'); });
+    var target = document.getElementById('view-' + name);
+    if (target) target.classList.add('active');
 
-    msg.textContent = message;
-    openModal("modal-confirm");
-
-    // Clonamos el botón para eliminar listeners anteriores
-    var newBtn = btn.cloneNode(true);
-    btn.parentNode.replaceChild(newBtn, btn);
-    newBtn.addEventListener("click", function () {
-      closeModal("modal-confirm");
-      if (typeof onConfirm === "function") onConfirm();
+    document.querySelectorAll('.nav-btn').forEach(function (b) {
+      if ((b.getAttribute('onclick') || '').indexOf("'" + name + "'") >= 0) b.classList.add('active');
     });
   }
 
-  // ── Loading en tabla ───────────────────────────────────────────────────────
-  function tableLoading(tbodyId, cols) {
-    var el = document.getElementById(tbodyId);
-    if (el) el.innerHTML = '<tr class="loading-row"><td colspan="' + cols + '">⏳ Cargando...</td></tr>';
+  function confirmDialog(message, onConfirm) {
+    document.getElementById('confirm-msg').textContent = message;
+    openModal('modal-confirm');
+    var btn = document.getElementById('btn-confirm-ok');
+    var newBtn = btn.cloneNode(true);
+    btn.parentNode.replaceChild(newBtn, btn);
+    newBtn.addEventListener('click', function () {
+      closeModal('modal-confirm');
+      onConfirm();
+    });
   }
 
   return {
-    normalizarTexto,
-    fmtCurrency,
-    fmtDate,
-    genId,
-    labelMethod,
-    showToast,
-    openModal,
-    closeModal,
-    confirmDialog,
-    tableLoading,
+    fmtCurrency: fmtCurrency,
+    fmtDate: fmtDate,
+    labelMethod: labelMethod,
+    showToast: showToast,
+    openModal: openModal,
+    closeModal: closeModal,
+    showView: showView,
+    confirmDialog: confirmDialog,
+    normalizarTexto: normalizarTexto
   };
 
 })();

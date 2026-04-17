@@ -1,147 +1,162 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// Purchases.js  —  Módulo Compras
-// ─────────────────────────────────────────────────────────────────────────────
+// Modulo de compras
+
+
 
 var Purchases = (function () {
 
-  var cache = [];
-  var lines = [];   // líneas de la compra en curso
+  var purchaseItems = []; // lineas de la compra en edicion
 
-  // ── Init ───────────────────────────────────────────────────────────────────
-  async function init() {
-    UI.tableLoading("purchases-tbody", 5);
-    cache = await State.getPurchases();
-    renderTable(cache);
-
-    var search = document.getElementById("pur-search");
-    if (search) search.addEventListener("input", function () {
-      var q = UI.normalizarTexto(search.value);
-      renderTable(cache.filter(function (p) {
-        return UI.normalizarTexto(p.id || "").includes(q) ||
-               UI.normalizarTexto(p.proveedor || "").includes(q) ||
-               UI.normalizarTexto(p.fecha || "").includes(q);
-      }));
-    });
-
-    // Botón agregar línea
-    var btnAdd = document.getElementById("btn-add-purchase-line");
-    if (btnAdd) btnAdd.addEventListener("click", addLine);
-
-    // Submit del formulario de compra
-    var form = document.getElementById("purchase-form");
-    if (form) form.addEventListener("submit", savePurchase);
+  function init() {
+    document.getElementById('btn-add-purchase-line').addEventListener('click', addLine);
+    document.getElementById('purchase-form').addEventListener('submit', savePurchase);
+    document.getElementById('pur-search').addEventListener('input', renderTable);
+    renderTable();
   }
 
-  // ── Tabla ──────────────────────────────────────────────────────────────────
-  function renderTable(list) {
-    var tbody = document.getElementById("purchases-tbody");
-    if (!tbody) return;
+  function refresh() { renderTable(); }
+
+  // ── Tabla de historial de compras ──
+  function renderTable() {
+    var q     = UI.normalizarTexto(document.getElementById('pur-search').value);
+    var tbody = document.getElementById('purchases-tbody');
+    var list  = State.getPurchases().slice().reverse().filter(function (p) {
+      return UI.normalizarTexto(p.id).indexOf(q) >= 0 ||
+             UI.normalizarTexto(p.supplier || '').indexOf(q) >= 0;
+    });
 
     if (!list.length) {
-      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-light);padding:28px">Sin compras registradas</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-light)">'
+        + (q ? 'Sin resultados' : 'No hay compras registradas')
+        + '</td></tr>';
       return;
     }
 
     tbody.innerHTML = list.map(function (p) {
-      var count = 0;
-      try { count = JSON.parse(p.itemsJson || "[]").length; } catch (e) {}
-      return '<tr>' +
-        '<td><span class="badge badge-gold">' + (p.id || "—") + '</span></td>' +
-        '<td>' + UI.fmtDate(p.fecha) + '</td>' +
-        '<td>' + (p.proveedor || "—") + '</td>' +
-        '<td>' + count + ' producto(s)</td>' +
-        '<td><b>' + UI.fmtCurrency(p.total) + '</b></td>' +
-      '</tr>';
-    }).join("");
+      var totalCosto = (p.items || []).reduce(function (s, i) { return s + i.cost * i.qty; }, 0);
+      return '<tr>'
+        + '<td><strong>' + p.id + '</strong></td>'
+        + '<td>' + UI.fmtDate(p.date) + '</td>'
+        + '<td>' + (p.supplier || '—') + '</td>'
+        + '<td>' + (p.items ? p.items.length : 0) + ' producto(s)</td>'
+        + '<td><strong>' + UI.fmtCurrency(totalCosto) + '</strong></td>'
+        + '</tr>';
+    }).join('');
   }
 
-  // ── Abrir modal ────────────────────────────────────────────────────────────
+  // ── Formulario nueva compra ──
   function openForm() {
-    lines = [];
-    var sup  = document.getElementById("pur-supplier");
-    var notes = document.getElementById("pur-notes");
-    if (sup)  sup.value  = "";
-    if (notes) notes.value = "";
+    purchaseItems = [];
+    document.getElementById('pur-supplier').value = '';
+    document.getElementById('pur-notes').value    = '';
     renderLines();
-    UI.openModal("modal-purchase");
+    addLine(); // empezar con una linea vacia
+    UI.openModal('modal-purchase');
   }
 
-  // ── Líneas de productos ────────────────────────────────────────────────────
   function addLine() {
-    lines.push({ nombre: "", cantidad: 1, costoUnit: 0 });
-    renderLines();
-  }
+    var products = State.getProducts();
+    var options  = products.map(function (p) {
+      return '<option value="' + p.id + '">' + p.code + ' - ' + p.name + '</option>';
+    }).join('');
 
-  function removeLine(idx) {
-    lines.splice(idx, 1);
+    var lineId = Date.now();
+    purchaseItems.push({ lineId: lineId, productId: '', qty: 1, cost: 0 });
     renderLines();
   }
 
   function renderLines() {
-    var wrap  = document.getElementById("purchase-lines");
-    var total = document.getElementById("pur-total");
-    if (!wrap) return;
+    var el       = document.getElementById('purchase-lines');
+    var products = State.getProducts();
 
-    if (!lines.length) {
-      wrap.innerHTML = '<p style="color:var(--text-light);text-align:center;padding:12px;font-size:.85rem">Sin productos — haz clic en "+ Agregar producto"</p>';
-      if (total) total.textContent = UI.fmtCurrency(0);
+    if (!purchaseItems.length) {
+      el.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-light)">Agrega productos a la compra</div>';
       return;
     }
 
-    wrap.innerHTML = lines.map(function (l, i) {
-      var sub = (l.cantidad || 0) * (l.costoUnit || 0);
-      return '<div class="purchase-line">' +
-        '<input class="form-control" placeholder="Nombre" value="' + (l.nombre || "") + '" oninput="Purchases._update(' + i + ',\'nombre\',this.value)">' +
-        '<input class="form-control" type="number" min="1" value="' + (l.cantidad || 1) + '" oninput="Purchases._update(' + i + ',\'cantidad\',+this.value)">' +
-        '<input class="form-control" type="number" min="0" value="' + (l.costoUnit || 0) + '" oninput="Purchases._update(' + i + ',\'costoUnit\',+this.value)">' +
-        '<span style="font-weight:700;font-size:.85rem">' + UI.fmtCurrency(sub) + '</span>' +
-        '<button type="button" class="btn-delete" onclick="Purchases.removeLine(' + i + ')" style="padding:4px 7px">✕</button>' +
-      '</div>';
-    }).join("");
+    el.innerHTML = purchaseItems.map(function (line, idx) {
+      var options = '<option value="">-- Seleccionar --</option>' + products.map(function (p) {
+        return '<option value="' + p.id + '"' + (line.productId === p.id ? ' selected' : '') + '>'
+          + p.code + ' - ' + p.name + '</option>';
+      }).join('');
 
-    var gran = lines.reduce(function (s, l) { return s + (l.cantidad || 0) * (l.costoUnit || 0); }, 0);
-    if (total) total.textContent = UI.fmtCurrency(gran);
+      return '<div class="purchase-line" data-idx="' + idx + '">'
+        + '<select class="form-control pur-prod" data-idx="' + idx + '">' + options + '</select>'
+        + '<input type="number" class="form-control pur-qty" data-idx="' + idx + '" value="' + line.qty + '" min="1" placeholder="Cant." style="width:80px">'
+        + '<input type="number" class="form-control pur-cost" data-idx="' + idx + '" value="' + (line.cost || '') + '" min="0" placeholder="Costo unit." style="width:120px">'
+        + '<span class="pur-subtotal" data-idx="' + idx + '">' + UI.fmtCurrency(line.qty * line.cost) + '</span>'
+        + '<button type="button" class="btn btn-ghost btn-sm btn-remove-line" data-idx="' + idx + '">X</button>'
+        + '</div>';
+    }).join('');
+
+    // Calcular total
+    var total = purchaseItems.reduce(function (s, l) { return s + l.qty * l.cost; }, 0);
+    document.getElementById('pur-total').textContent = UI.fmtCurrency(total);
+
+    // Eventos
+    el.querySelectorAll('.pur-prod').forEach(function (sel) {
+      sel.addEventListener('change', function () {
+        var idx = parseInt(sel.dataset.idx);
+        purchaseItems[idx].productId = sel.value;
+        var prod = State.getProductById(sel.value);
+        if (prod) { purchaseItems[idx].cost = prod.cost; renderLines(); }
+      });
+    });
+    el.querySelectorAll('.pur-qty').forEach(function (inp) {
+      inp.addEventListener('input', function () {
+        var idx = parseInt(inp.dataset.idx);
+        purchaseItems[idx].qty = parseInt(inp.value) || 1;
+        renderLines();
+      });
+    });
+    el.querySelectorAll('.pur-cost').forEach(function (inp) {
+      inp.addEventListener('input', function () {
+        var idx = parseInt(inp.dataset.idx);
+        purchaseItems[idx].cost = parseFloat(inp.value) || 0;
+        renderLines();
+      });
+    });
+    el.querySelectorAll('.btn-remove-line').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var idx = parseInt(btn.dataset.idx);
+        purchaseItems.splice(idx, 1);
+        renderLines();
+      });
+    });
   }
 
-  // Actualizar un campo de una línea (llamado desde el HTML inline)
-  function _update(idx, field, val) {
-    if (lines[idx]) { lines[idx][field] = val; renderLines(); }
-  }
-
-  // ── Guardar compra ──────────────────────────────────────────────────────────
-  async function savePurchase(e) {
+  function savePurchase(e) {
     e.preventDefault();
 
-    if (!lines.length) { UI.showToast("Agrega al menos un producto", "error"); return; }
-    var validLines = lines.filter(function (l) { return l.nombre && l.cantidad > 0; });
-    if (!validLines.length) { UI.showToast("Completa los productos", "error"); return; }
+    var supplier = document.getElementById('pur-supplier').value.trim();
+    var notes    = document.getElementById('pur-notes').value.trim();
 
-    var prov  = document.getElementById("pur-supplier")?.value || "";
-    var notes = document.getElementById("pur-notes")?.value    || "";
-    var total = validLines.reduce(function (s, l) { return s + l.cantidad * l.costoUnit; }, 0);
+    // Validar lineas
+    var validLines = purchaseItems.filter(function (l) { return l.productId && l.qty > 0; });
+    if (!validLines.length) {
+      UI.showToast('Agrega al menos un producto a la compra', 'error');
+      return;
+    }
+    var incomplete = purchaseItems.some(function (l) { return !l.productId; });
+    if (incomplete) {
+      UI.showToast('Selecciona el producto en todas las lineas', 'error');
+      return;
+    }
 
-    var compra = {
-      id:        UI.genId("C"),
-      fecha:     new Date().toLocaleDateString("es-CO"),
-      proveedor: prov,
-      notas:     notes,
-      total:     total,
-      itemsJson: JSON.stringify(validLines),
+    var data = {
+      supplier: supplier || 'Sin proveedor',
+      notes:    notes,
+      items:    validLines.map(function (l) {
+        return { productId: l.productId, name: State.getProductById(l.productId).name, qty: l.qty, cost: l.cost };
+      })
     };
 
-    UI.showToast("Guardando compra...", "info");
-    var res = await State.addPurchase(compra);
-
-    if (res.success) {
-      cache.unshift(compra);
-      renderTable(cache);
-      UI.closeModal("modal-purchase");
-      UI.showToast("✅ Compra registrada — " + UI.fmtCurrency(total));
-    } else {
-      UI.showToast("Error al guardar", "error");
-    }
+    var purchase = State.addPurchase(data);
+    UI.closeModal('modal-purchase');
+    renderTable();
+    if (window.Products) Products.refresh();
+    UI.showToast('Compra ' + purchase.id + ' registrada', 'success');
   }
 
-  return { init, openForm, addLine, removeLine, _update };
+  return { init: init, refresh: refresh, openForm: openForm };
 
 })();
